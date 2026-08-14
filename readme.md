@@ -2,7 +2,7 @@
   <img src="res/fawn_icon.ico" alt="Fawn logo" width="96" height="96">
 </p>
 
-<h1 align="center">Fawn v1.4.10</h1>
+<h1 align="center">Fawn</h1>
 
 <p align="center">
   A small, beginner-friendly scripting language built from scratch in C++.
