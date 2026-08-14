@@ -1,0 +1,57 @@
+# --- Build output ---
+build/
+out/
+eg/
+cmake-build-*/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+Testing/
+
+# Ninja
+.ninja_log
+.ninja_deps
+build.ninja
+
+# --- Installer / packaging (explicitly ignored) ---
+Setup/
+*.exe
+FawnSetup*.exe
+
+# --- Compiled binaries / object files ---
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.pdb
+*.ilk
+fawn
+
+# --- IDE / editor files ---
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+.idea/
+*.iml
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Misc ---
+*.log
+*.tmp

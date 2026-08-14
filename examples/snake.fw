@@ -1,0 +1,648 @@
+// =======================================================
+// 🐍 FAWN SNAKE - OPTIMIZED
+// =======================================================
+//
+// Controls:
+//   W / A / S / D  -> Move
+//   P              -> Pause
+//   Q              -> Quit
+//   R              -> Restart after all lives are gone
+//
+// Features:
+//   - 3 lives
+//   - Packed snake positions
+//   - No full-board scan every frame
+//   - Static board rendered once
+//   - Only changed cells are redrawn
+//   - Live FPS meter
+//   - Increasing difficulty
+//
+// =======================================================
+
+
+// -------------------------------------------------------
+// TERMINAL HELPERS
+// -------------------------------------------------------
+
+fn hide_cursor() {
+    out << "\e[?25l"
+}
+
+fn show_cursor() {
+    out << "\e[?25h"
+}
+
+fn clear_screen() {
+    out << "\e[2J\e[3J\e[H"
+}
+
+
+// -------------------------------------------------------
+// DRAW ONE PLAYFIELD CELL
+//
+// Board layout:
+//   Row 1 -> top border
+//   Row 2 -> HUD
+//   Row 3 -> separator
+//   Row 4 -> first playable row
+//
+// Therefore game y=1 maps to terminal row 4.
+// -------------------------------------------------------
+
+fn draw_cell(int x, int y, string value) {
+    int terminal_x = x + 1
+    int terminal_y = y + 3
+
+    out << "\e["
+    out << terminal_y
+    out << ";"
+    out << terminal_x
+    out << "H"
+    out << value
+}
+
+
+// -------------------------------------------------------
+// CHECK WHETHER A PACKED POSITION IS OCCUPIED
+// -------------------------------------------------------
+
+fn snake_contains(list snake, int position) {
+    int i = 0
+    int snake_length = snake.size()
+
+    while i < snake_length {
+        if snake[i] == position {
+            return true
+        }
+        i++
+    }
+
+    return false
+}
+
+
+// -------------------------------------------------------
+// START SCREEN
+// -------------------------------------------------------
+
+fn start_screen() {
+    clear_screen()
+
+    out << "\e[36m"
+    out << "==============================================" << end
+    out << "              F A W N  S N A K E" << end
+    out << "==============================================" << end
+    out << "\e[0m"
+
+    out << end
+
+    out << "\e[32m"
+    out << "              W / A / S / D" << end
+    out << "\e[0m"
+
+    out << "               Move the snake" << end
+    out << end
+
+    out << "\e[33m"
+    out << "               P = Pause" << end
+    out << "               Q = Quit" << end
+    out << "\e[0m"
+
+    out << end
+
+    out << "\e[31m"
+    out << "          You have 3 lives!" << end
+    out << "\e[0m"
+
+    out << end
+
+    out << "\e[90m"
+    out << "            Press any key..." << end
+    out << "\e[0m"
+
+    while keyPressed() == false {
+        sleep(50)
+    }
+
+    getKey()
+}
+
+
+// -------------------------------------------------------
+// PAUSE SCREEN
+// -------------------------------------------------------
+
+fn pause_screen() {
+    clear_screen()
+
+    out << "\e[33m"
+    out << "==============================================" << end
+    out << "                    PAUSED" << end
+    out << "==============================================" << end
+    out << "\e[0m"
+
+    out << end
+    out << "              P -> Continue" << end
+    out << "              Q -> Quit" << end
+}
+
+
+// -------------------------------------------------------
+// STATIC BOARD
+// -------------------------------------------------------
+
+fn draw_board(int width, int height) {
+    clear_screen()
+
+    string frame = ""
+
+    // Top border
+    frame = frame + "\e[36m"
+    frame = frame + "+"
+
+    int i = 0
+
+    while i < width - 2 {
+        frame = frame + "-"
+        i++
+    }
+
+    frame = frame + "+"
+    frame = frame + "\e[0m\n"
+
+    // HUD line
+    frame = frame + " \n"
+
+    // Separator
+    frame = frame + "\e[36m"
+    frame = frame + "+"
+
+    i = 0
+
+    while i < width - 2 {
+        frame = frame + "-"
+        i++
+    }
+
+    frame = frame + "+"
+    frame = frame + "\e[0m\n"
+
+    // Playfield
+    int y = 1
+
+    while y < height - 1 {
+        frame = frame + "\e[36m"
+        frame = frame + "|"
+        frame = frame + "\e[0m"
+
+        int x = 1
+
+        while x < width - 1 {
+            frame = frame + " "
+            x++
+        }
+
+        frame = frame + "\e[36m"
+        frame = frame + "|"
+        frame = frame + "\e[0m\n"
+
+        y++
+    }
+
+    // Bottom border
+    frame = frame + "\e[36m"
+    frame = frame + "+"
+
+    i = 0
+
+    while i < width - 2 {
+        frame = frame + "-"
+        i++
+    }
+
+    frame = frame + "+"
+    frame = frame + "\e[0m\n"
+
+    // Controls
+    frame = frame + "\e[90m"
+    frame = frame + " W/A/S/D Move    P Pause    Q Quit"
+    frame = frame + "\e[0m\n"
+
+    out << frame << end
+}
+
+
+// -------------------------------------------------------
+// HUD
+// -------------------------------------------------------
+
+fn draw_hud(int score, int length, int speed, int fps, int lives) {
+    out << "\e[2;1H"
+    out << "\e[2K"
+
+    out << "\e[33m"
+    out << " Score: "
+    out << score
+    out << "   Length: "
+    out << length
+    out << "   Speed: "
+    out << speed
+    out << "ms   FPS: "
+    out << fps
+    out << "   Lives: "
+    out << lives
+    out << "\e[0m"
+}
+
+
+// -------------------------------------------------------
+// DRAW SNAKE
+// -------------------------------------------------------
+
+fn draw_snake(list snake, int width, int dir_x, int dir_y) {
+    int length = snake.size()
+    int i = length - 1
+
+    while i > 0 {
+        int position = snake[i]
+        int x = position % width
+        int y = position / width
+
+        draw_cell(x, y, "\e[32mo\e[0m")
+
+        i--
+    }
+
+    int head_position = snake[0]
+    int head_x = head_position % width
+    int head_y = head_position / width
+
+    if dir_x == 1 {
+        draw_cell(head_x, head_y, "\e[1;32m>\e[0m")
+    }
+    elif dir_x == -1 {
+        draw_cell(head_x, head_y, "\e[1;32m<\e[0m")
+    }
+    elif dir_y == -1 {
+        draw_cell(head_x, head_y, "\e[1;32m^\e[0m")
+    }
+    else {
+        draw_cell(head_x, head_y, "\e[1;32mv\e[0m")
+    }
+}
+
+
+// -------------------------------------------------------
+// RESET SNAKE AFTER LOSING A LIFE
+// -------------------------------------------------------
+
+fn reset_snake(list snake, int width, int height) {
+    int start_x = width / 2
+    int start_y = height / 2
+
+    snake.flush()
+
+    snake.put(start_y * width + start_x)
+    snake.put(start_y * width + start_x - 1)
+    snake.put(start_y * width + start_x - 2)
+}
+
+
+// -------------------------------------------------------
+// GAME OVER SCREEN
+// -------------------------------------------------------
+
+fn game_over_screen(int score, int length, int fps) {
+    clear_screen()
+
+    out << "\e[31m"
+    out << "==============================================" << end
+    out << "                  GAME OVER" << end
+    out << "==============================================" << end
+    out << "\e[0m"
+
+    out << end
+
+    out << "\e[33m"
+    out << "                  Score: "
+    out << score
+    out << end
+
+    out << "                  Length: "
+    out << length
+    out << end
+
+    out << "                  FPS: "
+    out << fps
+    out << end
+    out << "\e[0m"
+
+    out << end
+
+    out << "\e[32m"
+    out << "             R -> Restart" << end
+    out << "\e[0m"
+
+    out << "\e[31m"
+    out << "             Q -> Quit" << end
+    out << "\e[0m"
+}
+
+
+// -------------------------------------------------------
+// PLAY ONE GAME
+// -------------------------------------------------------
+
+fn play_round(int width, int height) {
+    int lives = 3
+    int score = 0
+    int speed = 120
+    int fps = 0
+    int frame_count = 0
+    int fps_timer = clock()
+
+    bool game_over = false
+    bool paused = false
+    bool quit_game = false
+
+    list snake = {0, 0, 0}
+
+    reset_snake(snake, width, height)
+
+    int dir_x = 1
+    int dir_y = 0
+
+    int food_x = random(1, width - 2)
+    int food_y = random(1, height - 2)
+    int food_position = food_y * width + food_x
+
+    while snake_contains(snake, food_position) {
+        food_x = random(1, width - 2)
+        food_y = random(1, height - 2)
+        food_position = food_y * width + food_x
+    }
+
+    draw_board(width, height)
+    draw_hud(score, snake.size(), speed, fps, lives)
+    draw_snake(snake, width, dir_x, dir_y)
+    draw_cell(food_x, food_y, "\e[1;31m@\e[0m")
+
+    while game_over == false and quit_game == false {
+        if keyPressed() {
+            string key = getKey()
+
+            if key == "w" or key == "W" {
+                if dir_y != 1 {
+                    dir_x = 0
+                    dir_y = -1
+                }
+            }
+            elif key == "s" or key == "S" {
+                if dir_y != -1 {
+                    dir_x = 0
+                    dir_y = 1
+                }
+            }
+            elif key == "a" or key == "A" {
+                if dir_x != 1 {
+                    dir_x = -1
+                    dir_y = 0
+                }
+            }
+            elif key == "d" or key == "D" {
+                if dir_x != -1 {
+                    dir_x = 1
+                    dir_y = 0
+                }
+            }
+            elif key == "p" or key == "P" {
+                if paused == false {
+                    paused = true
+                    pause_screen()
+                }
+                else {
+                    paused = false
+                    draw_board(width, height)
+                    draw_hud(score, snake.size(), speed, fps, lives)
+                    draw_snake(snake, width, dir_x, dir_y)
+                    draw_cell(food_x, food_y, "\e[1;31m@\e[0m")
+                }
+            }
+            elif key == "q" or key == "Q" {
+                quit_game = true
+            }
+        }
+
+        if paused == false and quit_game == false {
+            int old_head = snake[0]
+            int old_tail = snake[snake.size() - 1]
+
+            int old_head_x = old_head % width
+            int old_head_y = old_head / width
+
+            int next_x = old_head_x + dir_x
+            int next_y = old_head_y + dir_y
+
+            bool collision = false
+
+            if next_x <= 0 or next_x >= width - 1 {
+                collision = true
+            }
+
+            if next_y <= 0 or next_y >= height - 1 {
+                collision = true
+            }
+
+            int next_position = next_y * width + next_x
+            bool ate_food = next_position == food_position
+
+            if collision == false {
+                int collision_index = 0
+                int collision_limit = snake.size()
+
+                if ate_food == false {
+                    collision_limit = collision_limit - 1
+                }
+
+                while collision_index < collision_limit {
+                    if snake[collision_index] == next_position {
+                        collision = true
+                        break
+                    }
+                    collision_index++
+                }
+            }
+
+            if collision {
+                lives = lives - 1
+
+                if lives <= 0 {
+                    game_over = true
+                }
+                else {
+                    draw_board(width, height)
+
+                    reset_snake(snake, width, height)
+
+                    dir_x = 1
+                    dir_y = 0
+
+                    food_x = random(1, width - 2)
+                    food_y = random(1, height - 2)
+                    food_position = food_y * width + food_x
+
+                    while snake_contains(snake, food_position) {
+                        food_x = random(1, width - 2)
+                        food_y = random(1, height - 2)
+                        food_position = food_y * width + food_x
+                    }
+
+                    draw_hud(score, snake.size(), speed, fps, lives)
+                    draw_snake(snake, width, dir_x, dir_y)
+                    draw_cell(food_x, food_y, "\e[1;31m@\e[0m")
+
+                    sleep(300)
+                }
+            }
+            else {
+                draw_cell(old_head_x, old_head_y, "\e[32mo\e[0m")
+
+                snake.place(0, next_position)
+
+                if ate_food {
+                    score = score + 10
+
+                    if speed > 45 {
+                        speed = speed - 5
+                    }
+
+                    food_x = random(1, width - 2)
+                    food_y = random(1, height - 2)
+                    food_position = food_y * width + food_x
+
+                    while snake_contains(snake, food_position) {
+                        food_x = random(1, width - 2)
+                        food_y = random(1, height - 2)
+                        food_position = food_y * width + food_x
+                    }
+
+                    draw_cell(food_x, food_y, "\e[1;31m@\e[0m")
+                }
+                else {
+                    snake.pull()
+
+                    int old_tail_x = old_tail % width
+                    int old_tail_y = old_tail / width
+
+                    draw_cell(old_tail_x, old_tail_y, " ")
+                }
+
+                int new_head_x = next_position % width
+                int new_head_y = next_position / width
+
+                if dir_x == 1 {
+                    draw_cell(new_head_x, new_head_y, "\e[1;32m>\e[0m")
+                }
+                elif dir_x == -1 {
+                    draw_cell(new_head_x, new_head_y, "\e[1;32m<\e[0m")
+                }
+                elif dir_y == -1 {
+                    draw_cell(new_head_x, new_head_y, "\e[1;32m^\e[0m")
+                }
+                else {
+                    draw_cell(new_head_x, new_head_y, "\e[1;32mv\e[0m")
+                }
+
+                frame_count = frame_count + 1
+
+                int current_time = clock()
+                int elapsed = current_time - fps_timer
+
+                if elapsed >= 1000 {
+                    fps = (frame_count * 1000) / elapsed
+                    frame_count = 0
+                    fps_timer = current_time
+
+                    draw_hud(score, snake.size(), speed, fps, lives)
+                }
+
+                if dir_y != 0 {
+                    sleep(speed *2)
+                }
+                else {
+                    sleep(speed)
+                }
+            }
+        }
+        else {
+            sleep(50)
+        }
+    }
+
+    if quit_game {
+        return false
+    }
+
+    game_over_screen(score, snake.size(), fps)
+
+    bool finished = false
+
+    while finished == false {
+        if keyPressed() {
+            string key = getKey()
+
+            if key == "r" or key == "R" {
+                return true
+            }
+
+            if key == "q" or key == "Q" {
+                return false
+            }
+        }
+
+        sleep(50)
+    }
+
+    return false
+}
+
+
+// -------------------------------------------------------
+// MAIN
+// -------------------------------------------------------
+
+fn play_snake() {
+    int width = 42
+    int height = 20
+    bool running = true
+
+    hide_cursor()
+    start_screen()
+
+    while running {
+        bool restart = play_round(width, height)
+
+        if restart {
+            running = true
+        }
+        else {
+            running = false
+        }
+    }
+
+    show_cursor()
+    clear_screen()
+
+    out << "\e[36m"
+    out << "==============================================" << end
+    out << "           Thanks for playing!" << end
+    out << "==============================================" << end
+    out << "\e[0m"
+}
+
+
+// -------------------------------------------------------
+// START
+// -------------------------------------------------------
+
+play_snake()

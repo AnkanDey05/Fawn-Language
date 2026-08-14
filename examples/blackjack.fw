@@ -1,0 +1,157 @@
+// ui functions
+fn clear_screen() {
+    out << "\e[2J\e[3J\e[H"
+}
+fn println(var message, string color = "white") {
+    if color == "red" {
+        out << "\e[31m" << message << "\e[0m" << end
+    } elif color == "green" {
+        out << "\e[32m" << message << "\e[0m" << end
+    } elif color == "yellow" {
+        out << "\e[33m" << message << "\e[0m" << end
+    } elif color == "cyan" {
+        out << "\e[36m" << message << "\e[0m" << end
+    } else {
+        out << message << end
+    }
+}
+
+
+fn get_val(int card) : int {
+    if card >= 10 then return 10
+    if card == 1 then return 11 
+    return card
+}
+
+fn calc_score(var hand) : int {
+    int score = 0
+    int aces = 0
+    int i = 0
+    
+    while i < hand.size() {
+        int card = hand[i]
+        if card == 1 then aces++
+        
+        score = score + get_val(card)
+        i++
+    }
+    
+    while score > 21 and aces > 0 {
+        score = score - 10
+        aces--
+    }
+    
+    return score
+}
+
+
+var money = 100
+
+while money > 0 {
+    list p_hand = { random(1, 13), random(1, 13) }
+    list d_hand = { random(1, 13), random(1, 13) }
+    
+    var playing = 1
+    var p_score = 0
+    
+    // Player
+    while playing == 1 {
+        clear_screen()
+        
+        println("        BLACKJACK       ", "cyan")
+        out << "Balance: \e[32m$" << money << "\e[0m\n\n" << end
+        p_score = calc_score(p_hand)
+        
+        out << "Dealer shows: {" << d_hand[0] << ", [Hidden]}" << end
+        out << "Your Hand:    " << p_hand << " (Score: " << p_score << ")" << end
+        
+        if p_score > 21 {
+            println("\n>> YOU BUSTED! Over 21.", "red")
+            money = money - 10
+            playing = 0
+            break
+        }
+        
+        if p_score == 21 {
+            println("\n>> 21! Perfect score!", "green")
+            playing = 0
+            break
+        }
+        
+        println("\n1. Hit (Draw Card)\n2. Stand (End Turn)", "cyan")
+        out << "Choice: "
+        
+        var choice = 0 
+        in >> choice
+        
+        if choice == 1 {
+            p_hand.put(random(1, 13))
+        } else {
+            playing = 0
+        }
+    }
+    
+    var final_p = calc_score(p_hand)
+    
+    if final_p <= 21 {
+        var d_score = calc_score(d_hand)
+        
+        // Dealer drawing loop (Redraws on every new card)
+        while d_score < 17 {
+            clear_screen()
+            println("==================================", "cyan")
+            println("       FAWN BLACKJACK (PRO)       ", "cyan")
+            println("==================================", "cyan")
+            
+            out << "\nYour Hand:   " << p_hand << " (Score: " << final_p << ")" << end
+            println("\n--- DEALER IS DRAWING ---", "yellow")
+            out << "Dealer Hand: " << d_hand << " (Score: " << d_score << ")" << end
+            
+            out << "\nEnter 1 to continue..." 
+            var ack = 0
+            in >> ack
+            
+            d_hand.put(random(1, 13))
+            d_score = calc_score(d_hand)
+        }
+        
+        // Final Screen Resolution
+        clear_screen()
+        println("==================================", "cyan")
+        println("       FAWN BLACKJACK (PRO)       ", "cyan")
+        println("==================================", "cyan")
+        
+        out << "\nYour Hand:   " << p_hand << " (Score: " << final_p << ")" << end
+        println("\n--- FINAL DEALER HAND ---", "yellow")
+        out << "Dealer Hand: " << d_hand << " (Score: " << d_score << ")" << end
+        
+        if d_score > 21 {
+            println("\n>> DEALER BUSTS! YOU WIN $10!", "green")
+            money = money + 10
+        } elif d_score > final_p {
+            println("\n>> DEALER WINS! You lose $10.", "red")
+            money = money - 10
+        } elif d_score < final_p {
+            println("\n>> YOU WIN $10!", "green")
+            money = money + 10
+        } else {
+            println("\n>> IT'S A TIE (Push)!", "yellow")
+        }
+    }
+    
+    if money <= 0 {
+        println("\nYou are broke! The casino kicks you out.", "red")
+        break
+    }
+    
+    // Reset Prompt
+    println("\n1. Play Again\n2. Walk Away", "cyan")
+    out << "Choice: "
+    var play_again = 0
+    in >> play_again
+    
+    if play_again != 1 {
+        out << "\nYou walk away with \e[32m$" << money << "\e[0m. Thanks for playing!" << end
+        break
+    }
+}
