@@ -421,7 +421,7 @@ The `examples/` directory contains runnable sample scripts, including:
 
 
 - `blackjack.fw` — a card game implementation
-- `snake.fw` - the classic snake game
+- `snake.fw` - the classic snake game(might not work depanding on your terminal because it relies on ascii escape sequesce)
 
 
 Run any of them with:
