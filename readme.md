@@ -91,19 +91,13 @@ Then I thought, *Well, if I can print "Hello World", can I make a multiline stat
 
 And that's basically how it started.
 
-What was supposed to be a quick experiment turned into a genuinely fun weekend project, and eventually into something I spent the next week or two working on. Along the way, I learned a huge amount about how programming languages actually work — tokenizing strings, parsing expressions, building an AST, designing syntax, handling errors, and much more.
-
-I did most of the work myself. I'd say around 80–85% of the project was written with my bare hands and researched by me, including the language design and even the name. I literally spent about an hour and a half going through a dictionary trying to find a name that wasn't already being used — well, finally the dictionary got some usage.
-
-That said, to be completely transparent, I did use AI as well. Specifically, Claude helped me debug some problems and explain concepts. The VS Code extension was also mostly generated with AI (if you have any issue with the extension, don't blame me). So I definitely had some help, but the core of the language — the research, the experimentation, and most of the implementation — was done by me. (Except the logo. :) )
+ I'd say around 85% (15% for generating logo, making this readme emotional -_- and debugging some stuffs) of the project was written with my bare hands, I literally spent about an hour and a half going through a dictionary trying to find a name that wasn't already being used(+1 for my dedication :) ) — well, finally the dictionary got some usage.
 
 The project went through a lot of changes along the way. At first, I wanted to make a completely ridiculous joke language. Later, I decided to take it in a different direction and build something simple, readable, and actually usable.
 
-I know there's a good chance that almost nobody will ever use this language, and honestly, that's okay.
-
 I don't know why I made this — maybe I'm stupid as hell — but hey, I had a lot of fun building it. Seeing everything finally come together and behave the way I imagined was incredibly satisfying.
 
-I don't know how far I'll take the project from here, or whether I'll keep developing it long-term. But regardless of where it goes, this has been one of the most fun projects I've worked on.
+To be honest the language is ridiculously slow just pretend you dont care about speed okay :0 (if you do just wait for a while i make the VM 🥀)
 
 If you enjoy the language or just like the idea behind it, consider leaving a star on the repository. It would mean a lot.
 

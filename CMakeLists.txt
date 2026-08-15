@@ -30,12 +30,9 @@ if (MSVC)
     target_link_options(fawn PRIVATE /LTCG)
 else()
     target_compile_options(fawn PRIVATE -Wall -Wextra -Wpedantic -O3 -flto)
+    target_link_options(fawn PRIVATE -flto)
 endif()
 
 if (FAWN_BUILD_WARNINGS)
     message(STATUS "Warnings enabled")
-else()
-    target_compile_options(fawn PRIVATE -Wall -Wextra -Wpedantic -O3 -flto)
-    target_link_options(fawn PRIVATE -flto)
-
 endif()
