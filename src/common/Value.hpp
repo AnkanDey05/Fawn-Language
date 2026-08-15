@@ -11,7 +11,13 @@ struct NullValue
 };
 
 struct Value;
-using ListType = std::shared_ptr<std::vector<Value>>;
+struct List{
+    std::vector<Value> elements;
+    std::string type = "";
+    bool isConst = false;
+    int fixedSize = -1;
+};
+using ListType = std::shared_ptr<List>;
 
 struct Value
 {
@@ -28,8 +34,13 @@ struct Value
     Value(const char* c) : data(std::string(c)) {}
     Value(ListType l) : data(l) {}
     
-    static Value makeList(std::vector<Value> elems = {}) {
-        return Value(std::make_shared<std::vector<Value>>(std::move(elems)));
+    static Value makeList(std::vector<Value> elems = {}, std::string elemType = "", bool isConst = false, int fixedSize = -1) {
+        auto list = std::make_shared<List>();
+        list->elements = std::move(elems);
+        list->type = elemType;
+        list->isConst = isConst;
+        list->fixedSize = fixedSize;
+        return Value(list);
     }
 
     // Type checker ---
@@ -117,10 +128,10 @@ struct Value
         if (isList()) {
             std::string result = "{";
             auto& list = *std::get<ListType>(data);
-            for (size_t i = 0; i < list.size(); i++) {
+            for (size_t i = 0; i < list.elements.size(); i++) {
                 if (i > 0) result += ", ";
-                if (list[i].isString()) result += "\"" + list[i].stringify() + "\"";
-                else result += list[i].stringify();
+                if (list.elements[i].isString()) result += "\"" + list.elements[i].stringify() + "\"";
+                else result += list.elements[i].stringify();
             }
             result += "}";
             return result;

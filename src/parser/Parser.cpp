@@ -54,12 +54,22 @@ bool Parser::check(TokenType type) const
     }
     return peek().m_type == type;
 }
-Token Parser::consume(TokenType type, const std::string& errorMessage)
+
+void Parser::error(const Token& token, const std::string& message, const std::string& hint)
+{
+    if (m_reporter) {
+        m_reporter->report({ErrorKind::Syntax, message, token.m_line, hint, token.m_column});
+    }
+    throw ParserError(message + " (got '" + token.m_lexeme + "' at line " + std::to_string(token.m_line) + ")");
+}
+
+Token Parser::consume(TokenType type, const std::string& errorMessage, const std::string& hint)
 {
     if (check(type)) {
         return advance();
     }
-    throw ParserError(errorMessage + " (got '" + peek().m_lexeme + "' at line " + std::to_string(peek().m_line) + ")");
+    error(peek(), errorMessage, hint);
+    return peek();
 }
 
 
@@ -78,18 +88,19 @@ std::unique_ptr<Expr> Parser::parsePrimary()
     }
     if (match({TokenType::LeftParen})) {
         auto expr = parseExpression();
-        consume(TokenType::RightParen, "Expected a ')' after expression");
+        consume(TokenType::RightParen, "Expected ')' after expression.", "Add a matching closing parenthesis ')'");
         return expr;
     }
     if (match({TokenType::If})) {
         auto cond = parseOr();
-        consume(TokenType::Then, "Expected 'then' in if-expression");
+        consume(TokenType::Then, "Expected 'then' in inline if-expression.", "Inline if-expression format: if condition then expr else expr");
         auto trueExpr = parseExpression();
-        consume(TokenType::Else, "Expected 'else' in if-expression");
+        consume(TokenType::Else, "Expected 'else' in inline if-expression.", "Inline if-expression format: if condition then expr else expr");
         auto falseExpr = parseExpression();
         return std::make_unique<TernaryExpr>(previous().m_line, std::move(cond), std::move(trueExpr), std::move(falseExpr));
     }
-    throw ParserError("Expected an expression (got '" + peek().m_lexeme + "' at line " + std::to_string(peek().m_line) + ")");
+    error(peek(), "Expected an expression.", "Check for a missing value, variable, or literal.");
+    return nullptr;
 }
 
 
@@ -114,7 +125,7 @@ std::unique_ptr<Expr> Parser::parseUnary()
     }
     if (match({TokenType::Increment, TokenType::Decrement})) {
         bool isInc = previous().m_type == TokenType::Increment;
-        Token name = consume(TokenType::Identifier, "Expected variable name after '" + previous().m_lexeme + "'");
+        Token name = consume(TokenType::Identifier, "Expected variable name after '" + previous().m_lexeme + "'.", "Increment/decrement ('++' / '--') can only be applied to variables.");
         return std::make_unique<IncrementExpr>(name.m_line, name, isInc);
     }
     return parseCall();
@@ -186,7 +197,7 @@ std::unique_ptr<Expr> Parser::parseTernary()
 
     if (match({TokenType::QuestionMark})) {
         auto trueExpr = parseTernary();
-        consume(TokenType::Colon, "Expected ':' in ternary expression");
+        consume(TokenType::Colon, "Expected ':' in ternary expression.", "Ternary expression format: condition ? true_expr : false_expr");
         auto falseExpr = parseTernary();
         return std::make_unique<TernaryExpr>(previous().m_line, std::move(expr), std::move(trueExpr), std::move(falseExpr));
     }
@@ -197,23 +208,38 @@ std::unique_ptr<Expr> Parser::parseAssignment()
 {
     auto expr = parseTernary();
 
-    if (match({TokenType::Equal})) {
-        Token equals = previous();
+    if (match({TokenType::Equal, TokenType::PlusEqual, TokenType::MinusEqual, TokenType::StarEqual, TokenType::SlashEqual, TokenType::ModuloEqual})) {
+        Token opToken = previous();
         auto value = parseAssignment();
 
-        if (auto* varExpr = dynamic_cast<VariableExpr*>(expr.get())) {
-            Token name = varExpr->name;
-            return std::make_unique<AssignExpr>(equals.m_line, name, std::move(value));
+        if (opToken.m_type == TokenType::Equal) {
+            if (auto* varExpr = dynamic_cast<VariableExpr*>(expr.get())) {
+                Token name = varExpr->name;
+                return std::make_unique<AssignExpr>(opToken.m_line, name, std::move(value));
+            }
+            if (auto* indexExpr = dynamic_cast<IndexExpr*>(expr.get())) {
+                return std::make_unique<IndexAssignExpr>(
+                    opToken.m_line,
+                    std::move(indexExpr->target),
+                    std::move(indexExpr->index),
+                    std::move(value));
+            }
+            error(peek(), "Invalid assignment target.", "You can only assign values to variables or list indices (e.g. x = 5 or arr[0] = 5).");
+        } else {
+            if (auto* varExpr = dynamic_cast<VariableExpr*>(expr.get())) {
+                Token name = varExpr->name;
+                return std::make_unique<CompoundAssignExpr>(opToken.m_line, name, opToken, std::move(value));
+            }
+            if (auto* indexExpr = dynamic_cast<IndexExpr*>(expr.get())) {
+                return std::make_unique<CompoundIndexAssignExpr>(
+                    opToken.m_line,
+                    std::move(indexExpr->target),
+                    std::move(indexExpr->index),
+                    opToken,
+                    std::move(value));
+            }
+            error(peek(), "Invalid compound assignment target.", "Compound operators (+=, -=, etc.) can only target variables or list indices.");
         }
-        if (auto* indexExpr = dynamic_cast<IndexExpr*>(expr.get())) {
-            return std::make_unique<IndexAssignExpr>(
-                equals.m_line,
-                std::move(indexExpr->target),
-                std::move(indexExpr->index),
-                std::move(value));
-        }
-
-        throw ParserError("Invalid assignment target.");
     }
 
     return expr;
@@ -240,20 +266,20 @@ std::unique_ptr<Expr> Parser::parseCall()
                 } while (match({TokenType::Comma}));
                 while (match({TokenType::NewLine})) {}
             }
-            Token paren = consume(TokenType::RightParen, "Expected ')' after arguments.");
+            Token paren = consume(TokenType::RightParen, "Expected ')' after arguments.", "Check for a missing closing parenthesis ')' in function call.");
             if (auto* varExpr = dynamic_cast<VariableExpr*>(expr.get())) {
                 expr = std::make_unique<CallExpr>(paren.m_line, varExpr->name, std::move(arguments));
             } else {
-                throw ParserError("Can only call functions by name.");
+                error(peek(), "Can only call functions by name.", "Function calls must target a valid function identifier.");
             }
         } else if (match({TokenType::LeftBracket})) {
             auto index = parseExpression();
-            Token bracket = consume(TokenType::RightBracket, "Expected ']' after index.");
+            Token bracket = consume(TokenType::RightBracket, "Expected ']' after index.", "Check for a missing closing bracket ']' in array/string indexing.");
             expr = std::make_unique<IndexExpr>(bracket.m_line, std::move(expr), std::move(index));
         } else if (match({TokenType::Dot})) {
             // Member call:
-            Token method = consume(TokenType::Identifier, "Expected method name after '.'.");
-            consume(TokenType::LeftParen, "Expected '(' after method name.");
+            Token method = consume(TokenType::Identifier, "Expected method name after '.'.", "Use a valid method name after '.', e.g. str.caps() or list.put()");
+            consume(TokenType::LeftParen, "Expected '(' after method name.", "Call methods using parentheses, e.g. list.put(item)");
             std::vector<std::unique_ptr<Expr>> arguments;
             while (match({TokenType::NewLine})) {}
             if (!check(TokenType::RightParen)) {
@@ -264,7 +290,7 @@ std::unique_ptr<Expr> Parser::parseCall()
                 } while (match({TokenType::Comma}));
                 while (match({TokenType::NewLine})) {}
             }
-            consume(TokenType::RightParen, "Expected ')' after method arguments.");
+            consume(TokenType::RightParen, "Expected ')' after method arguments.", "Close method call with a matching parenthesis ')'");
             expr = std::make_unique<MemberCallExpr>(method.m_line, std::move(expr), method, std::move(arguments));
         } else if (check(TokenType::Increment) || check(TokenType::Decrement)) {
             // Postfix x++ / x--
@@ -272,7 +298,7 @@ std::unique_ptr<Expr> Parser::parseCall()
             if (auto* varExpr = dynamic_cast<VariableExpr*>(expr.get())) {
                 expr = std::make_unique<IncrementExpr>(op.m_line, varExpr->name, op.m_type == TokenType::Increment);
             } else {
-                throw ParserError("'++' / '--' can only be used on variables.");
+                error(op, "'++' / '--' can only be used on variables.", "Postfix increment/decrement must target a variable name.");
             }
         } else {
             break;
@@ -304,7 +330,7 @@ std::unique_ptr<Stmt> Parser::parseStatement()
         {
             return parseVarDecStatement(true);
         }
-        throw ParserError("Expected a type or 'list' after 'const' at line: " + std::to_string(previous().m_line)+ "Got : " + previous().m_lexeme);
+        error(previous(), "Expected a type or 'list' after 'const'.", "Format: const int x = 10 or const list nums = {1, 2}");
     }
     if (check(TokenType::TypeKeyword) && peekNext().m_type == TokenType::LeftParen) {
         return parseExpressionStatement();
@@ -357,7 +383,7 @@ std::unique_ptr<Stmt> Parser::parseOutStatement()
         }
     }
     if (values.empty()) {
-        throw ParserError("Expected '<<' after 'out'/'print' at line " + std::to_string(line));
+        error(previous(), "Expected '<<' after 'out'/'print'.", "Print statements use format: out << expression << end");
     }
     return std::make_unique<OutStmt>(line, std::move(values));
 }
@@ -365,8 +391,8 @@ std::unique_ptr<Stmt> Parser::parseOutStatement()
 std::unique_ptr<Stmt> Parser::parseInStatement()
 {
     size_t line = previous().m_line;
-    consume(TokenType::ShiftRight, "Expected '>>' after 'in'");
-    Token target = consume(TokenType::Identifier, "Expected variable name after 'in >>'");
+    consume(TokenType::ShiftRight, "Expected '>>' after 'in'.", "Input statements use format: in >> variable_name");
+    Token target = consume(TokenType::Identifier, "Expected variable name after 'in >>'.", "Provide a variable identifier to store input.");
     return std::make_unique<InStmt>(line, std::move(target));
 }
 
@@ -382,7 +408,7 @@ std::vector<std::unique_ptr<Stmt>> Parser::parseBlock()
             statements.push_back(std::move(stmt));
         }
     }
-    consume(TokenType::RightBrace, "Expected '}' after block.");
+    consume(TokenType::RightBrace, "Unclosed block: expected '}'.", "Add a matching closing curly brace '}'");
     return statements;
 }
 
@@ -393,17 +419,17 @@ std::unique_ptr<Stmt> Parser::parseVarDecStatement(bool isConst)
         if (check(TokenType::TypeKeyword) || check(TokenType::Var)) {
             type = advance();
         } else {
-            throw ParserError("Expected type after 'const'");
+            error(previous(), "Expected type after 'const'.", "Specify a type like int, float, string, bool, or var after 'const'");
         }
     } else {
         type = previous();
     }
-    Token name = consume(TokenType::Identifier, "Expected an Identifier");
+    Token name = consume(TokenType::Identifier, "Expected variable name in declaration.", "Provide a valid variable identifier.");
     std::unique_ptr<Expr> initializer = nullptr;
     if (match({TokenType::Equal})) {
         initializer = parseExpression();
     } else if (isConst) {
-        throw ParserError("Const variable must be initialized");
+        error(name, "Const variable must be initialized.", "Provide an initial value when declaring a const variable, e.g. const int x = 10.");
     }
     return std::make_unique<VarDecStmt>(type.m_line, type, name, std::move(initializer), isConst);
 }
@@ -411,17 +437,17 @@ std::unique_ptr<Stmt> Parser::parseVarDecStatement(bool isConst)
 std::unique_ptr<Stmt> Parser::parseListDecStatement(bool isConst)
 {
     size_t line = previous().m_line; // the 'list' token
-    Token name = consume(TokenType::Identifier, "Expected list name.");
+    Token name = consume(TokenType::Identifier, "Expected list name.", "Provide a name for the list, e.g. list nums = {1, 2, 3}");
 
     std::unique_ptr<Expr> size = nullptr;
     if (match({TokenType::LeftBracket})) {
         size = parseExpression();
-        consume(TokenType::RightBracket, "Expected ']' after list size.");
+        consume(TokenType::RightBracket, "Expected ']' after list capacity size.", "Format: list[capacity] nums = {...}");
     }
 
     Token elementType(TokenType::Null, "", line); // default: untyped
     if (match({TokenType::Colon})) {
-        elementType = consume(TokenType::TypeKeyword, "Expected element type after ':'.");
+        elementType = consume(TokenType::TypeKeyword, "Expected element type after ':'.", "Format: list nums: int = {1, 2, 3}");
     }
 
     std::vector<std::unique_ptr<Expr>> elements;
@@ -429,7 +455,7 @@ std::unique_ptr<Stmt> Parser::parseListDecStatement(bool isConst)
 
     if (match({TokenType::Equal})) {
         while (match({TokenType::NewLine})) {}
-        consume(TokenType::LeftBrace, "Expected '{' to start list literal.");
+        consume(TokenType::LeftBrace, "Expected '{' to start list literal.", "Enclose list elements in curly braces '{...}'");
         while (match({TokenType::NewLine})) {}
         if (!check(TokenType::RightBrace)) {
             do {
@@ -439,7 +465,7 @@ std::unique_ptr<Stmt> Parser::parseListDecStatement(bool isConst)
             } while (match({TokenType::Comma}));
         }
         while (match({TokenType::NewLine})) {}
-        consume(TokenType::RightBrace, "Expected '}' after list elements.");
+        consume(TokenType::RightBrace, "Expected '}' after list elements.", "Close list initializer with '}'");
     }
 
     return std::make_unique<ListDecStmt>(line, name, std::move(size), elementType, std::move(elements), isConst, std::move(initExpr));
@@ -459,7 +485,7 @@ std::unique_ptr<Stmt> Parser::parseIfStatement()
     if (match({TokenType::Then})) {
         // One-liner If:
         if (check(TokenType::LeftBrace)) {
-            throw ParserError("Cannot use '{' after 'then' — use 'if condition { ... }' for blocks (at line " + std::to_string(line) + ")");
+            error(previous(), "Cannot use '{' after 'then'.", "Use 'if condition { ... }' for block statements.");
         }
         auto stmt = parseStatement();
         std::vector<std::unique_ptr<Stmt>> stmts;
@@ -467,7 +493,7 @@ std::unique_ptr<Stmt> Parser::parseIfStatement()
         thenBlock = std::make_unique<BlockStmt>(line, std::move(stmts));
     } else {
         // Block:
-        consume(TokenType::LeftBrace, "Expected '{' or 'then' after condition");
+        consume(TokenType::LeftBrace, "Expected '{' or 'then' after condition.", "Use 'if condition { ... }'");
         auto thenstmt = parseBlock();
         thenBlock = std::make_unique<BlockStmt>(line, std::move(thenstmt));
     }
@@ -481,7 +507,7 @@ std::unique_ptr<Stmt> Parser::parseIfStatement()
     } else if (match({TokenType::Else})) {
         while (match({TokenType::NewLine})) {}
         if (match({TokenType::Then})) {
-            throw ParserError("'else' does not need 'then' — use 'else <stmt>' or 'else { ... }' (at line " + std::to_string(previous().m_line) + ")");
+            error(previous(), "'else' does not need 'then'.", "Use 'else <stmt>' or 'else { ... }'");
         }
         if (check(TokenType::LeftBrace)) {
             //Else Block 
@@ -506,7 +532,7 @@ std::unique_ptr<Stmt> Parser::parseWhileStatement()
     auto con = parseExpression();
     // Skip newlines before opening brace
     while (match({TokenType::NewLine})) {}
-    consume(TokenType::LeftBrace, "Expected '{' after expression");
+    consume(TokenType::LeftBrace, "Expected '{' after condition.", "Format: while condition { ... }");
     auto bodystmt = parseBlock();
     auto bodyBlock = std::make_unique<BlockStmt>(line, std::move(bodystmt));
     return std::make_unique<WhileStmt>(line, std::move(con), std::move(bodyBlock));
@@ -515,10 +541,10 @@ std::unique_ptr<Stmt> Parser::parseWhileStatement()
 std::unique_ptr<Stmt> Parser::parseForStatement()
 {
     auto line = previous().m_line;
-    auto name = consume(TokenType::Identifier, "Expected identifier after 'for'");
-    consume(TokenType::In, "Expected 'in' after variable");
+    auto name = consume(TokenType::Identifier, "Expected variable name after 'for'.", "Format: for i in 1 -> 10 { ... }");
+    consume(TokenType::In, "Expected 'in' after variable name.", "Format: for i in 1 -> 10 { ... }");
     auto from = parseExpression();
-    consume(TokenType::Arrow, "Expected '->' after expression");
+    consume(TokenType::Arrow, "Expected '->' between loop range numbers.", "Format: for i in 1 -> 10 { ... }");
     auto to = parseExpression();
     std::unique_ptr<Expr> step = nullptr;
     if (match({TokenType::Step})) {
@@ -526,7 +552,7 @@ std::unique_ptr<Stmt> Parser::parseForStatement()
     }
     // Skip newlines before opening brace
     while (match({TokenType::NewLine})) {}
-    consume(TokenType::LeftBrace, "Expected '{' after expression");
+    consume(TokenType::LeftBrace, "Expected '{' after loop range.", "Enclose loop body in curly braces '{ ... }'");
     auto bodystmt = parseBlock();
     auto bodyBlock = std::make_unique<BlockStmt>(previous().m_line, std::move(bodystmt));
 
@@ -546,15 +572,15 @@ std::vector<Param> Parser::parseParamList()
             if (check(TokenType::TypeKeyword) || check(TokenType::Var) || check(TokenType::List)) {
                 type = advance();
             } else {
-                throw ParserError("Expected parameter type.");
+                error(peek(), "Expected parameter type.", "Specify a parameter type like int, float, string, bool, or var.");
             }
-            Token name = consume(TokenType::Identifier, "Expected parameter name.");
+            Token name = consume(TokenType::Identifier, "Expected parameter name.", "Provide a parameter identifier.");
             std::shared_ptr<Expr> defaultValue = nullptr;
             if (match({TokenType::Equal})) {
                 defaultValue = parseExpression();
                 hadDefault = true;
             } else if (hadDefault) {
-                throw ParserError("Parameter '" + name.m_lexeme + "' must have a default value (all params after a default must also have defaults).");
+                error(name, "Parameter '" + name.m_lexeme + "' must have a default value.", "All parameters after a default value must also have default values.");
             }
             paramlist.push_back({type, name, defaultValue});
             while (match({TokenType::NewLine})) {}
@@ -568,17 +594,17 @@ std::vector<Param> Parser::parseParamList()
 std::unique_ptr<Stmt> Parser::parseFuncDecStatement()
 {
     auto line = previous().m_line;
-    auto name = consume(TokenType::Identifier, "Expected 'identifier' after function declaration");
-    consume(TokenType::LeftParen, "Expected '(' after identifier");
+    auto name = consume(TokenType::Identifier, "Expected function name after 'fn'.", "Format: fn function_name() { ... }");
+    consume(TokenType::LeftParen, "Expected '(' after function name.", "Enclose function parameters in parentheses '()'");
     auto params = parseParamList();
-    consume(TokenType::RightParen, "Expected ')' after parameters.");
+    consume(TokenType::RightParen, "Expected ')' after parameters.", "Close parameter list with ')'");
     Token type(TokenType::Null, "", previous().m_line);
     if (match({TokenType::Colon})) {
-        type = consume(TokenType::TypeKeyword, "Expected return type after ':' ");
+        type = consume(TokenType::TypeKeyword, "Expected return type after ':'.", "Specify return type like int, float, string, or bool.");
     }
     // Skip newlines before opening brace
     while (match({TokenType::NewLine})) {}
-    consume(TokenType::LeftBrace, "Expected '{' after function at line " + std::to_string(line) );
+    consume(TokenType::LeftBrace, "Expected '{' before function body.", "Enclose function body in curly braces '{ ... }'");
     auto bodystmt = parseBlock();
     auto bodyBlock = std::make_unique<BlockStmt>(previous().m_line, std::move(bodystmt));
 

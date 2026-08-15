@@ -1,4 +1,4 @@
-#pragma  once
+#pragma once
 #include "../common/Token.hpp"
 #include "../common/Value.hpp"
 #include "../utils/Error.hpp"
@@ -11,8 +11,8 @@ struct VarEntry {
     std::string declaredType;
     bool isDynamic;
     bool isConst = false;
+    size_t line = 0;
 };
-
 
 class Env {
     std::unordered_map<std::string, VarEntry> values;
@@ -23,7 +23,10 @@ class Env {
     explicit Env(ErrorReporter* reporter = nullptr) : enclosing(nullptr), reporter(reporter) {}
     Env(std::shared_ptr<Env> enclosing) : enclosing(enclosing), reporter(enclosing ? enclosing->reporter : nullptr) {}
 
-    void define(const std::string& name, Value val,const std::string& declaredType, bool isDynamic, bool isConst = false);
+    void define(const Token& nameToken, Value val, const std::string& declaredType, bool isDynamic, bool isConst = false);
+    void define(const std::string& name, Value val, const std::string& declaredType, bool isDynamic, bool isConst = false);
     void assign(const Token& nameToken, Value val);
     Value get(const Token& nameToken);
+    bool isConst(const Token& nameToken);
+    bool isDefinedInCurrentScope(const std::string& name) const;
 };

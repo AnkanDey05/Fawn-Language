@@ -117,36 +117,44 @@ void Interpreter::execute(Stmt* statement)
         }
     }
 
-    environment->define(varDecl->name.m_lexeme, value,declaredType, isDynamic, varDecl->isConst);
+    if (functions.find(varDecl->name.m_lexeme) != functions.end()) {
+        reporter->report({ErrorKind::Reference,
+                          "Cannot declare variable '" + varDecl->name.m_lexeme + "': name is already used by a function",
+                          varDecl->name.m_line,
+                          "Choose a different name for your variable.", varDecl->name.m_column});
+        throw FatalError();
+    }
+
+    environment->define(varDecl->name, value, declaredType, isDynamic, varDecl->isConst);
     return;
     }
 
     // list declaration
     if (auto* listDecl = dynamic_cast<ListDecStmt*>(statement)) {
-        std::vector<Value> elems;
+        List list;
 
         if (listDecl->initExpr) {
             Value val = evaluate(listDecl->initExpr.get());
             if (val.isList()) {
-                elems = *val.asList(); // Copies the contents of the right-hand list
+                list = *val.asList(); // Copies the contents of the right-hand list
             } else {
                 throw std::runtime_error("Expected a list value after '=' at line " + std::to_string(statement->m_line));
             }
         } else {
             for (auto& elemExpr : listDecl->elements) {
-                elems.push_back(evaluate(elemExpr.get()));
+                list.elements.push_back(evaluate(elemExpr.get()));
             }
         }
 
         if (listDecl->elementType.m_type != TokenType::Null) {
             std::string expected = listDecl->elementType.m_lexeme;
-            for (size_t i = 0; i < elems.size(); i++) {
-                std::string actual = elems[i].getTypeAsString();
+            for (size_t i = 0; i < list.elements.size(); i++) {
+                std::string actual = list.elements[i].getTypeAsString();
                 bool matches =
-                    (expected == "int" && elems[i].isInt()) ||
-                    (expected == "float" && elems[i].isFloat()) ||
-                    (expected == "string" && elems[i].isString()) ||
-                    (expected == "bool" && elems[i].isBool());
+                    (expected == "int" && list.elements[i].isInt()) ||
+                    (expected == "float" && list.elements[i].isFloat()) ||
+                    (expected == "string" && list.elements[i].isString()) ||
+                    (expected == "bool" && list.elements[i].isBool());
                 if (!matches) {
                     throw std::runtime_error("List element at index " + std::to_string(i) +
                         " has type '" + actual + "' but list expects '" + expected +
@@ -155,14 +163,26 @@ void Interpreter::execute(Stmt* statement)
             }
         }
 
+        int fixedSize = -1;
         if (listDecl->size) {
-            int fixedSize = evaluate(listDecl->size.get()).asInt();
-            elems.resize(fixedSize);
+            fixedSize = evaluate(listDecl->size.get()).asInt();
+            if (static_cast<int>(list.elements.size()) > fixedSize) {
+                throw std::runtime_error("Initial elements exceed fixed list capacity of " + 
+                                         std::to_string(fixedSize) + " at line " + std::to_string(statement->m_line));
+            }
         }
 
-        Value listVal = Value::makeList(std::move(elems));
+        if (functions.find(listDecl->name.m_lexeme) != functions.end()) {
+            reporter->report({ErrorKind::Reference,
+                              "Cannot declare list '" + listDecl->name.m_lexeme + "': name is already used by a function",
+                              listDecl->name.m_line,
+                              "Choose a different name for your list.", listDecl->name.m_column});
+            throw FatalError();
+        }
+
         std::string declaredType = listDecl->elementType.m_lexeme == "var" ? "" : listDecl->elementType.m_lexeme;
-        environment->define(listDecl->name.m_lexeme, listVal, declaredType, true, listDecl->isConst);
+        Value listVal = Value::makeList(std::move(list.elements), declaredType, listDecl->isConst, fixedSize);
+        environment->define(listDecl->name, listVal, declaredType, true, listDecl->isConst);
         return;
     }
 
@@ -250,7 +270,7 @@ void Interpreter::execute(Stmt* statement)
                 for (int i = from_value; i <= to_value && !broken; i += step_value) {
                     environment = std::make_shared<Env>(prev);
                     std::string declaredType = forstmt->varName.m_lexeme == "var" ? "" : forstmt->varName.m_lexeme;
-                    environment->define(forstmt->varName.m_lexeme, Value(i),declaredType, forstmt->varName.m_lexeme == "var");
+                    environment->define(forstmt->varName, Value(i),declaredType, forstmt->varName.m_lexeme == "var");
                     try {
                         loopDepth++;
                         execute(forstmt->body.get());
@@ -270,7 +290,7 @@ void Interpreter::execute(Stmt* statement)
                 for (int i = from_value; i >= to_value && !broken; i += step_value) {
                     environment = std::make_shared<Env>(prev);
                     std::string declaredType = forstmt->varName.m_lexeme == "var" ? "" : forstmt->varName.m_lexeme;
-                    environment->define(forstmt->varName.m_lexeme, Value(i),declaredType, forstmt->varName.m_lexeme == "var");
+                    environment->define(forstmt->varName, Value(i),declaredType, forstmt->varName.m_lexeme == "var");
                     try {
                         loopDepth++;
                         execute(forstmt->body.get());
@@ -309,6 +329,22 @@ void Interpreter::execute(Stmt* statement)
     }
     // function
     if (auto* funcstmt  = dynamic_cast<FuncStmt*>(statement)) {
+        if (functions.find(funcstmt->name.m_lexeme) != functions.end()) {
+            reporter->report({ErrorKind::Reference,
+                              "Redeclaration of function '" + funcstmt->name.m_lexeme + "'",
+                              funcstmt->name.m_line,
+                              "A function with name '" + funcstmt->name.m_lexeme + "' is already defined.",
+                              funcstmt->name.m_column});
+            throw FatalError();
+        }
+        if (environment->isDefinedInCurrentScope(funcstmt->name.m_lexeme)) {
+            reporter->report({ErrorKind::Reference,
+                              "Cannot declare function '" + funcstmt->name.m_lexeme + "': name is already used by a variable",
+                              funcstmt->name.m_line,
+                              "Choose a unique name for your function.",
+                              funcstmt->name.m_column});
+            throw FatalError();
+        }
         functions[funcstmt->name.m_lexeme] = funcstmt;
         return;
     }
@@ -345,44 +381,82 @@ void Interpreter::execute(Stmt* statement)
 Value Interpreter::executeListMethod(ListType list, const std::string& method,
                                      std::vector<std::unique_ptr<Expr>>& args, size_t line)
 {
+    if (method == "put" || method == "place" || method == "pull" || 
+        method == "strip" || method == "flush" || method == "shuffle" || 
+        method == "flip" || method == "sort") 
+    {
+        if (list->isConst) {
+            throw std::runtime_error("Cannot modify const list at line " + std::to_string(line));
+        }
+    }
+
     // put
     if (method == "put") {
         if (args.size() != 1) throw std::runtime_error("put() takes exactly 1 argument at line " + std::to_string(line));
-        list->push_back(evaluate(args[0].get()));
+        if (list->fixedSize != -1 && static_cast<int>(list->elements.size()) >= list->fixedSize) {
+            throw std::runtime_error("Cannot put element: fixed-size list capacity (" + std::to_string(list->fixedSize) + ") reached at line " + std::to_string(line));
+        }
+        Value val = evaluate(args[0].get());
+        if (!list->type.empty()) {
+            std::string actual = val.getTypeAsString();
+            bool matches =
+                (list->type == "int" && val.isInt()) ||
+                (list->type == "float" && val.isFloat()) ||
+                (list->type == "string" && val.isString()) ||
+                (list->type == "bool" && val.isBool());
+            if (!matches) {
+                throw std::runtime_error("Cannot put '" + actual + "' into list of type '" + list->type + "' at line " + std::to_string(line));
+            }
+        }
+        list->elements.push_back(val);
         return Value(list);
     }
     // place
     if (method == "place") {
         if (args.size() != 2) throw std::runtime_error("place() takes exactly 2 arguments at line " + std::to_string(line));
+        if (list->fixedSize != -1 && static_cast<int>(list->elements.size()) >= list->fixedSize) {
+            throw std::runtime_error("Cannot place element: fixed-size list capacity (" + std::to_string(list->fixedSize) + ") reached at line " + std::to_string(line));
+        }
         int idx = evaluate(args[0].get()).asInt();
         Value val = evaluate(args[1].get());
-        if (idx < 0 || idx > static_cast<int>(list->size())) {
+        if (!list->type.empty()) {
+            std::string actual = val.getTypeAsString();
+            bool matches =
+                (list->type == "int" && val.isInt()) ||
+                (list->type == "float" && val.isFloat()) ||
+                (list->type == "string" && val.isString()) ||
+                (list->type == "bool" && val.isBool());
+            if (!matches) {
+                throw std::runtime_error("Cannot place '" + actual + "' into list of type '" + list->type + "' at line " + std::to_string(line));
+            }
+        }
+        if (idx < 0 || idx > static_cast<int>(list->elements.size())) {
             throw std::runtime_error("Index out of bounds in place() at line " + std::to_string(line));
         }
-        list->insert(list->begin() + idx, val);
+        list->elements.insert(list->elements.begin() + idx, val);
         return Value(list);
     }
     // pull
     if (method == "pull") {
-        if (list->empty()) throw std::runtime_error("Cannot pull from empty list at line " + std::to_string(line));
-        int idx = static_cast<int>(list->size()) - 1; // default: last
+        if (list->elements.empty()) throw std::runtime_error("Cannot pull from empty list at line " + std::to_string(line));
+        int idx = static_cast<int>(list->elements.size()) - 1; // default: last
         if (args.size() == 1) {
             idx = evaluate(args[0].get()).asInt();
         }
-        if (idx < 0 || idx >= static_cast<int>(list->size())) {
+        if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
             throw std::runtime_error("Index out of bounds in pull() at line " + std::to_string(line));
         }
-        Value val = (*list)[idx];
-        list->erase(list->begin() + idx);
+        Value val = (*list).elements[idx];
+        list->elements.erase(list->elements.begin() + idx);
         return val;
     }
     // stip
     if (method == "strip") {
         if (args.size() != 1) throw std::runtime_error("strip() takes exactly 1 argument at line " + std::to_string(line));
         Value target = evaluate(args[0].get());
-        for (auto it = list->begin(); it != list->end(); ++it) {
+        for (auto it = list->elements.begin(); it != list->elements.end(); ++it) {
             if (*it == target) {
-                list->erase(it);
+                list->elements.erase(it);
                 return Value(list);
             }
         }
@@ -393,13 +467,13 @@ Value Interpreter::executeListMethod(ListType list, const std::string& method,
         if (!args.empty()) throw std::runtime_error("shuffle() takes no arguments at line " + std::to_string(line));
         static std::random_device rd;
         static std::mt19937 g(rd());
-        std::shuffle(list->begin(), list->end(), g);
+        std::shuffle(list->elements.begin(), list->elements.end(), g);
         return Value(list);
     }
     // flush
     if (method == "flush") {
         if (!args.empty()) throw std::runtime_error("flush() takes no arguments at line " + std::to_string(line));
-        list->clear();
+        list->elements.clear();
         return Value(list);
     }
     // clone
@@ -412,7 +486,7 @@ Value Interpreter::executeListMethod(ListType list, const std::string& method,
         if (args.size() != 1) throw std::runtime_error("freq() takes exactly 1 argument at line " + std::to_string(line));
         Value target = evaluate(args[0].get());
         int count = 0;
-        for (auto& elem : *list) {
+        for (auto& elem : list->elements) {
             if (elem == target) count++;
         }
         return Value(count);
@@ -421,21 +495,21 @@ Value Interpreter::executeListMethod(ListType list, const std::string& method,
     if (method == "find") {
         if (args.size() != 1) throw std::runtime_error("find() takes exactly 1 argument at line " + std::to_string(line));
         Value target = evaluate(args[0].get());
-        for (size_t i = 0; i < list->size(); i++) {
-            if ((*list)[i] == target) return Value(static_cast<int>(i));
+        for (size_t i = 0; i < list->elements.size(); i++) {
+            if ((*list).elements[i] == target) return Value(static_cast<int>(i));
         }
         return Value(-1);
     }
     // flip
     if (method == "flip") {
         if (!args.empty()) throw std::runtime_error("flip() takes no arguments at line " + std::to_string(line));
-        std::reverse(list->begin(), list->end());
-        return Value::makeList(*list);
+        std::reverse(list->elements.begin(), list->elements.end());
+        return Value(list);
     }
     // sort
     if (method == "sort") {
         if (!args.empty()) throw std::runtime_error("sort() takes no arguments at line " + std::to_string(line));
-        std::sort(list->begin(), list->end(), [line](const Value& a, const Value& b) {
+        std::sort(list->elements.begin(), list->elements.end(), [line](const Value& a, const Value& b) {
             return a < b;
         });
         return Value(list);
@@ -443,7 +517,7 @@ Value Interpreter::executeListMethod(ListType list, const std::string& method,
     // size
     if (method == "size") {
         if (!args.empty()) throw std::runtime_error("size() takes no arguments at line " + std::to_string(line));
-        return Value(static_cast<int>(list->size()));
+        return Value(static_cast<int>(list->elements.size()));
     }
 
     throw std::runtime_error("Unknown list method '" + method + "' at line " + std::to_string(line));
@@ -498,11 +572,11 @@ Value Interpreter::evaluate(Expr* expr)
         if (target.isList()) {
             auto list = target.asList();
             int idx = index.asInt();
-            if (idx < 0 || idx >= static_cast<int>(list->size())) {
+            if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
                 throw std::runtime_error("Index " + std::to_string(idx) + " out of bounds (list size: " +
-                    std::to_string(list->size()) + ") at line " + std::to_string(expr->m_line));
+                    std::to_string(list->elements.size()) + ") at line " + std::to_string(expr->m_line));
             }
-            return (*list)[idx];
+            return list->elements[idx];
         }
         if (target.isString()) {
             int idx = index.asInt();
@@ -515,33 +589,183 @@ Value Interpreter::evaluate(Expr* expr)
         throw std::runtime_error("Cannot index into non-list/non-string value at line " + std::to_string(expr->m_line));
     }
 
-    //array assign 
+    // array / string index assignment 
     if (auto* idxAssign = dynamic_cast<IndexAssignExpr*>(expr)) {
         Value target = evaluate(idxAssign->target.get());
         Value index = evaluate(idxAssign->index.get());
         Value value = evaluate(idxAssign->value.get());
+
+        if (target.isString()) {
+            auto* var = dynamic_cast<VariableExpr*>(idxAssign->target.get());
+            if (var && environment->isConst(var->name)) {
+                throw std::runtime_error("Cannot modify index of const string '" + var->name.m_lexeme +
+                                         "' at line " + std::to_string(expr->m_line));
+            }
+            std::string str = target.asString();
+            int idx = index.asInt();
+            if (idx < 0 || idx >= static_cast<int>(str.size())) {
+                throw std::runtime_error("Index out of bounds for string assignment at line " + std::to_string(expr->m_line));
+            }
+            if (!value.isString()) {
+                throw std::runtime_error("Cannot assign non-string value to string index at line " + std::to_string(expr->m_line));
+            }
+            std::string replacement = value.asString();
+            if (replacement.empty()) {
+                throw std::runtime_error("Cannot assign empty string to string index at line " + std::to_string(expr->m_line));
+            }
+            str[idx] = replacement[0];
+            if (var) {
+                environment->assign(var->name, Value(str));
+            }
+            return Value(std::string(1, str[idx]));
+        }
+
         if (!target.isList()) {
-            throw std::runtime_error("Cannot index-assign into non-list value at line " + std::to_string(expr->m_line));
+            throw std::runtime_error("Cannot index-assign into non-list/non-string value at line " + std::to_string(expr->m_line));
         }
+
         auto list = target.asList();
-        int idx = index.asInt();
-        if (idx < 0 || idx >= static_cast<int>(list->size())) {
-            throw std::runtime_error("Index out of bounds for assignment at line " + std::to_string(expr->m_line));
+        if (list->isConst) {
+            throw std::runtime_error("Cannot assign to index of const list at line " + std::to_string(expr->m_line));
         }
-        (*list)[idx] = value;
+        if (!list->type.empty()) {
+            std::string actual = value.getTypeAsString();
+            bool matches =
+                (list->type == "int" && value.isInt()) ||
+                (list->type == "float" && value.isFloat()) ||
+                (list->type == "string" && value.isString()) ||
+                (list->type == "bool" && value.isBool());
+            if (!matches) {
+                throw std::runtime_error("Cannot assign '" + actual + "' to list of type '" +
+                                         list->type + "' at line " + std::to_string(expr->m_line));
+            }
+        }
+        int idx = index.asInt();
+        if (list->fixedSize != -1) {
+            if (idx < 0 || idx >= list->fixedSize) {
+                throw std::runtime_error("Index " + std::to_string(idx) + " out of bounds for fixed-size list (capacity: " + std::to_string(list->fixedSize) + ") at line " + std::to_string(expr->m_line));
+            }
+            if (idx >= static_cast<int>(list->elements.size())) {
+                list->elements.resize(idx + 1);
+            }
+        } else {
+            if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
+                throw std::runtime_error("Index out of bounds for assignment at line " + std::to_string(expr->m_line));
+            }
+        }
+        list->elements[idx] = value;
         return value;
+    }
+
+    // compound assignment (+=, -=, *=, /=, %=)
+    if (auto* compAssign = dynamic_cast<CompoundAssignExpr*>(expr)) {
+        Value currentVal = environment->get(compAssign->name);
+        Value rightVal = evaluate(compAssign->value.get());
+        Value newVal;
+
+        switch (compAssign->op.m_type) {
+            case TokenType::PlusEqual:   newVal = currentVal + rightVal; break;
+            case TokenType::MinusEqual:  newVal = currentVal - rightVal; break;
+            case TokenType::StarEqual:   newVal = currentVal * rightVal; break;
+            case TokenType::SlashEqual:  newVal = currentVal / rightVal; break;
+            case TokenType::ModuloEqual: newVal = currentVal % rightVal; break;
+            default:
+                throw std::runtime_error("Unknown compound operator at line " + std::to_string(compAssign->m_line));
+        }
+
+        environment->assign(compAssign->name, newVal);
+        return newVal;
+    }
+
+    // compound index assignment (x[i] += val)
+    if (auto* compIdxAssign = dynamic_cast<CompoundIndexAssignExpr*>(expr)) {
+        Value target = evaluate(compIdxAssign->target.get());
+        Value index = evaluate(compIdxAssign->index.get());
+        Value rightVal = evaluate(compIdxAssign->value.get());
+
+        if (target.isString()) {
+            auto* var = dynamic_cast<VariableExpr*>(compIdxAssign->target.get());
+            if (var && environment->isConst(var->name)) {
+                throw std::runtime_error("Cannot modify index of const string '" + var->name.m_lexeme +
+                                         "' at line " + std::to_string(expr->m_line));
+            }
+            std::string str = target.asString();
+            int idx = index.asInt();
+            if (idx < 0 || idx >= static_cast<int>(str.size())) {
+                throw std::runtime_error("Index out of bounds for string assignment at line " + std::to_string(expr->m_line));
+            }
+            Value charVal(std::string(1, str[idx]));
+            Value newVal;
+            switch (compIdxAssign->op.m_type) {
+                case TokenType::PlusEqual:   newVal = charVal + rightVal; break;
+                case TokenType::MinusEqual:  newVal = charVal - rightVal; break;
+                case TokenType::StarEqual:   newVal = charVal * rightVal; break;
+                case TokenType::SlashEqual:  newVal = charVal / rightVal; break;
+                case TokenType::ModuloEqual: newVal = charVal % rightVal; break;
+                default:
+                    throw std::runtime_error("Unknown compound operator at line " + std::to_string(compIdxAssign->m_line));
+            }
+            if (!newVal.isString() || newVal.asString().empty()) {
+                throw std::runtime_error("Invalid result for string index assignment at line " + std::to_string(expr->m_line));
+            }
+            str[idx] = newVal.asString()[0];
+            if (var) {
+                environment->assign(var->name, Value(str));
+            }
+            return Value(std::string(1, str[idx]));
+        }
+
+        if (!target.isList()) {
+            throw std::runtime_error("Cannot compound index-assign into non-list/non-string value at line " + std::to_string(expr->m_line));
+        }
+
+        auto list = target.asList();
+        if (list->isConst) {
+            throw std::runtime_error("Cannot assign to index of const list at line " + std::to_string(expr->m_line));
+        }
+
+        int idx = index.asInt();
+        if (idx < 0 || idx >= static_cast<int>(list->elements.size())) {
+            throw std::runtime_error("Index " + std::to_string(idx) + " out of bounds for list assignment at line " + std::to_string(expr->m_line));
+        }
+
+        Value currentVal = list->elements[idx];
+        Value newVal;
+        switch (compIdxAssign->op.m_type) {
+            case TokenType::PlusEqual:   newVal = currentVal + rightVal; break;
+            case TokenType::MinusEqual:  newVal = currentVal - rightVal; break;
+            case TokenType::StarEqual:   newVal = currentVal * rightVal; break;
+            case TokenType::SlashEqual:  newVal = currentVal / rightVal; break;
+            case TokenType::ModuloEqual: newVal = currentVal % rightVal; break;
+            default:
+                throw std::runtime_error("Unknown compound operator at line " + std::to_string(compIdxAssign->m_line));
+        }
+
+        if (!list->type.empty()) {
+            std::string actual = newVal.getTypeAsString();
+            bool matches =
+                (list->type == "int" && newVal.isInt()) ||
+                (list->type == "float" && newVal.isFloat()) ||
+                (list->type == "string" && newVal.isString()) ||
+                (list->type == "bool" && newVal.isBool());
+            if (!matches) {
+                throw std::runtime_error("Cannot assign '" + actual + "' to list of type '" +
+                                         list->type + "' at line " + std::to_string(expr->m_line));
+            }
+        }
+
+        list->elements[idx] = newVal;
+        return newVal;
     }
 
     // membercall
     if (auto* memberCall = dynamic_cast<MemberCallExpr*>(expr)) {
         Value target = evaluate(memberCall->target.get());
         if (target.isList()) {
-            return executeListMethod(target.asList(), memberCall->methodName.m_lexeme,
-                                     memberCall->arguments, expr->m_line);
+            return executeListMethod(target.asList(), memberCall->methodName.m_lexeme, memberCall->arguments, expr->m_line);
         }
         if (target.isString()) {
-            return executeStringMethod(target.asString(), memberCall->methodName.m_lexeme,
-                                       memberCall->arguments, expr->m_line);
+            return executeStringMethod(target.asString(), memberCall->methodName.m_lexeme,memberCall->arguments, expr->m_line);
         }
         throw std::runtime_error("Method calls are only supported on lists and strings at line " + std::to_string(expr->m_line));
     }
@@ -615,7 +839,7 @@ Value Interpreter::evaluate(Expr* expr)
                 else if (ptype == "string" && !val.isString()) val = Value(val.stringify());
                 else if (ptype == "bool" && !val.isBool()) val = Value(val.isTruthy());
 
-                callEnv->define(func->params[i].name.m_lexeme, val , declaredType, ptype == "var", false);
+                callEnv->define(func->params[i].name, val , declaredType, ptype == "var", false);
             }
 
             auto prev = environment;
@@ -815,7 +1039,7 @@ void Interpreter::registerNatives()
     nativeFunctions["len"] = [](std::vector<Value> args, size_t line) -> Value {
         if (args.size() != 1) throw std::runtime_error("len() takes exactly 1 argument at line " + std::to_string(line));
         if (args[0].isString()) return Value(static_cast<int>(args[0].asString().size()));
-        if (args[0].isList()) return Value(static_cast<int>(args[0].asList()->size()));
+        if (args[0].isList()) return Value(static_cast<int>(args[0].asList()->elements.size()));
         throw std::runtime_error("len() requires a string or list argument at line " + std::to_string(line));
     };
 

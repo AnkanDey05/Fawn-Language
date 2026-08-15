@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <string>
 #include <string_view>
-#pragma once
+
 enum class TokenType
 {
     // Literals
@@ -42,6 +42,11 @@ enum class TokenType
     Decrement,
 
     Equal,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    ModuloEqual,
     EqualEqual,
     EqualEqualEqual,
     NotEqual,

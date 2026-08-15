@@ -9,8 +9,7 @@
 #include "../common/Token.hpp"
 #include "../ast/Stmt.hpp"
 #include "../ast/Expr.hpp"
-
-
+#include "../utils/Error.hpp"
 
 class ParserError : public std::runtime_error
 {
@@ -22,6 +21,7 @@ class Parser
     private:
         const std::vector<Token> &m_source;
         size_t m_current{0};
+        ErrorReporter* m_reporter{nullptr};
 
 
         // Helpers --- 
@@ -33,7 +33,8 @@ class Parser
         const Token& advance();
         bool match(std::initializer_list<TokenType> types);
         bool check(TokenType type) const;
-        Token consume(TokenType type, const std::string& errorMessage);
+        void error(const Token& token, const std::string& message, const std::string& hint = "");
+        Token consume(TokenType type, const std::string& errorMessage, const std::string& hint = "");
 
         // Statements ---
     public:
@@ -70,6 +71,7 @@ class Parser
         std::unique_ptr<Expr> parsePrimary();
     
         
-        explicit Parser(const std::vector<Token> &tokens) : m_source(tokens), m_current(0) {};
+        explicit Parser(const std::vector<Token> &tokens, ErrorReporter* reporter = nullptr) 
+            : m_source(tokens), m_current(0), m_reporter(reporter) {};
         std::vector<std::unique_ptr<Stmt>> parse();
 };

@@ -17,28 +17,36 @@ void CodeRunner::runFile(const std::string& path) {
     ErrorReporter reporter(path, source);
     Lexer lexer(source);
     auto tokens = lexer.tokenize();
-    Parser parser(tokens);
+    Parser parser(tokens, &reporter);
     try {
         auto stmt = parser.parse();
+        if (reporter.haserror()) {
+            reporter.flush();
+            return;
+        }
         Interpreter intrp(&reporter);
         intrp.interpret(stmt);
         if (reporter.haserror()) reporter.flush();
     } catch (ParserError& error) {
-        std::cerr << "Error: " << error.what() << "\n";
+        if (reporter.haserror()) reporter.flush();
+        else std::cerr << "Error: " << error.what() << "\n";
     }
 }
 
 void CodeRunner::checkFile(const std::string& path)
 {
     std::string source  = filemanager.read(path);
+    ErrorReporter reporter(path, source);
 
     try {
-    Lexer lexer(source);
-    auto tokens = lexer.tokenize();
-    Parser parser(tokens);
-    auto stmts = parser.parse();
+        Lexer lexer(source);
+        auto tokens = lexer.tokenize();
+        Parser parser(tokens, &reporter);
+        auto stmts = parser.parse();
+        if (reporter.haserror()) reporter.flush();
     } catch (ParserError& error) {
-        std::cout<< "Error: " << error.what() << "\n";
+        if (reporter.haserror()) reporter.flush();
+        else std::cout<< "Error: " << error.what() << "\n";
     }
 }
 
@@ -49,8 +57,6 @@ void CodeRunner::printVersion()
 
 void CodeRunner::runREPL()
 {
-    ErrorReporter reporter("<repl>", "");
-    Interpreter interp(&reporter);
     std::string line;
     printVersion();
     std::cout<<" REPL Mode\n";
@@ -59,15 +65,23 @@ void CodeRunner::runREPL()
         if (!std::getline(std::cin, line)) break;
         if (line == "exit") break;
 
+        ErrorReporter reporter("<repl>", line);
+        Interpreter interp(&reporter);
+
         try {
-        Lexer lexer(line);
-        auto tokens = lexer.tokenize();
-        Parser parser(tokens);
-        auto stmts = parser.parse();
-        interp.interpret(stmts);
-        if (reporter.haserror()) reporter.flush();
+            Lexer lexer(line);
+            auto tokens = lexer.tokenize();
+            Parser parser(tokens, &reporter);
+            auto stmts = parser.parse();
+            if (reporter.haserror()) {
+                reporter.flush();
+                continue;
+            }
+            interp.interpret(stmts);
+            if (reporter.haserror()) reporter.flush();
         } catch (std::runtime_error& error) {
-            std::cerr<< "Error: " << error.what() << "\n";
+            if (reporter.haserror()) reporter.flush();
+            else std::cerr<< "Error: " << error.what() << "\n";
             continue;
         }
     }    

@@ -126,49 +126,54 @@ Token Lexer::scanOperatorOrSymbols()
             case ',': return Token(TokenType::Comma, ",", m_line, startColumn);
             case '.': return Token(TokenType::Dot, ".", m_line, startColumn);
             case ':': return Token(TokenType::Colon, ":", m_line, startColumn);
-            case '%': return Token(TokenType::Modulo, "%", m_line, startColumn);
-            case '*': return Token(TokenType::Star, "*", m_line, startColumn);
+            case '%':
+                if (match('=')) return Token(TokenType::ModuloEqual, "%=", m_line, startColumn);
+                return Token(TokenType::Modulo, "%", m_line, startColumn);
+            case '*':
+                if (match('=')) return Token(TokenType::StarEqual, "*=", m_line, startColumn);
+                return Token(TokenType::Star, "*", m_line, startColumn);
 
             case '+':
-                if (match('+')) {  return (Token(TokenType::Increment, "++", m_line)); }
-                else { return(Token(TokenType::Plus, "+", m_line)); }
+                if (match('+')) { return Token(TokenType::Increment, "++", m_line, startColumn); }
+                else if (match('=')) { return Token(TokenType::PlusEqual, "+=", m_line, startColumn); }
+                else { return Token(TokenType::Plus, "+", m_line, startColumn); }
 
             case '-':
-                if (match('-')) {  
-                   return Token(TokenType::Decrement, "--", m_line); }
-                else if (match('>')) {  return Token(TokenType::Arrow, "->", m_line); }
-                else { return Token(TokenType::Minus, "-", m_line); }
+                if (match('-')) { return Token(TokenType::Decrement, "--", m_line, startColumn); }
+                else if (match('>')) { return Token(TokenType::Arrow, "->", m_line, startColumn); }
+                else if (match('=')) { return Token(TokenType::MinusEqual, "-=", m_line, startColumn); }
+                else { return Token(TokenType::Minus, "-", m_line, startColumn); }
 
             case '=':
                 if (match('=')) {
-                    
                     if (match('=')) {
-                        
-                        return (Token(TokenType::EqualEqualEqual, "===", m_line));
+                        return Token(TokenType::EqualEqualEqual, "===", m_line, startColumn);
                     } else {
-                        return (Token(TokenType::EqualEqual, "==", m_line));
+                        return Token(TokenType::EqualEqual, "==", m_line, startColumn);
                     }
                 } else {
-                    return (Token(TokenType::Equal, "=", m_line));
+                    return Token(TokenType::Equal, "=", m_line, startColumn);
                 }
 
             case '<':
-                if (match('=')) { return (Token(TokenType::LessEqual, "<=", m_line)); }
-                else if (match('<')) {  return (Token(TokenType::ShiftLeft, "<<", m_line)); }
-                else { return (Token(TokenType::Less, "<", m_line)); };
+                if (match('=')) { return Token(TokenType::LessEqual, "<=", m_line, startColumn); }
+                else if (match('<')) { return Token(TokenType::ShiftLeft, "<<", m_line, startColumn); }
+                else { return Token(TokenType::Less, "<", m_line, startColumn); }
 
             case '>':
-                if (match('=')) {  return (Token(TokenType::GreaterEqual, ">=", m_line)); }
-                else if (match('>')) {  return (Token(TokenType::ShiftRight, ">>", m_line)); }
-                else { return (Token(TokenType::Greater, ">", m_line)); }
+                if (match('=')) { return Token(TokenType::GreaterEqual, ">=", m_line, startColumn); }
+                else if (match('>')) { return Token(TokenType::ShiftRight, ">>", m_line, startColumn); }
+                else { return Token(TokenType::Greater, ">", m_line, startColumn); }
 
             case '!':
-                if (match('=')) {  return (Token(TokenType::NotEqual, "!=", m_line)); }
-                else { return (Token(TokenType::Not, "!", m_line)); } 
+                if (match('=')) { return Token(TokenType::NotEqual, "!=", m_line, startColumn); }
+                else { return Token(TokenType::Not, "!", m_line, startColumn); } 
 
-            case '?': return (Token(TokenType::QuestionMark, "?", m_line));
+            case '?': return Token(TokenType::QuestionMark, "?", m_line, startColumn);
 
-            case '/': return (Token(TokenType::Slash, "/", m_line));
+            case '/':
+                if (match('=')) return Token(TokenType::SlashEqual, "/=", m_line, startColumn);
+                return Token(TokenType::Slash, "/", m_line, startColumn);
 
             default:
                 return (Token(TokenType::Invalid, std::string(1, ch), m_line));

@@ -119,3 +119,24 @@ class TernaryExpr : public Expr
         TernaryExpr(size_t line, std::unique_ptr<Expr> cond, std::unique_ptr<Expr> t, std::unique_ptr<Expr> f)
             : Expr(line), condition(std::move(cond)), trueExpr(std::move(t)), falseExpr(std::move(f)) {}
 };
+
+class CompoundAssignExpr : public Expr
+{
+    public:
+    Token name;
+    Token op;
+    std::unique_ptr<Expr> value;
+        CompoundAssignExpr(size_t line, Token name, Token op, std::unique_ptr<Expr> val)
+            : Expr(line), name(name), op(op), value(std::move(val)) {}
+};
+
+class CompoundIndexAssignExpr : public Expr
+{
+    public:
+    std::unique_ptr<Expr> target;
+    std::unique_ptr<Expr> index;
+    Token op;
+    std::unique_ptr<Expr> value;
+        CompoundIndexAssignExpr(size_t line, std::unique_ptr<Expr> target, std::unique_ptr<Expr> index, Token op, std::unique_ptr<Expr> value)
+            : Expr(line), target(std::move(target)), index(std::move(index)), op(op), value(std::move(value)) {}
+};

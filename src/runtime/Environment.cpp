@@ -1,9 +1,32 @@
 #include "Environment.hpp"
 #include <string>
 
-void Env::define(const std::string& name, Value val,const std::string& declaredType, bool isDynamic, bool isConst)
+void Env::define(const Token& nameToken, Value val, const std::string& declaredType, bool isDynamic, bool isConst)
 {
-    values[name] = VarEntry{val, declaredType, isDynamic, isConst};
+    std::string name = nameToken.m_lexeme;
+    auto it = values.find(name);
+    if (it != values.end()) {
+        if (reporter) {
+            std::string lineInfo = it->second.line > 0 ? " on line " + std::to_string(it->second.line) : "";
+            reporter->report({ErrorKind::Reference,
+                              "Redeclaration of variable '" + name + "' in the same scope",
+                              nameToken.m_line,
+                              "Variable '" + name + "' was already declared" + lineInfo + ". Choose a different name or assign to it without re-declaring.",
+                              nameToken.m_column});
+        }
+        throw FatalError();
+    }
+    values[name] = VarEntry{val, declaredType, isDynamic, isConst, nameToken.m_line};
+}
+
+void Env::define(const std::string& name, Value val, const std::string& declaredType, bool isDynamic, bool isConst)
+{
+    values[name] = VarEntry{val, declaredType, isDynamic, isConst, 0};
+}
+
+bool Env::isDefinedInCurrentScope(const std::string& name) const
+{
+    return values.find(name) != values.end();
 }
 
 Value Env::get(const Token& nameToken)
@@ -58,4 +81,17 @@ void Env::assign(const Token& nameToken, Value val)
     reporter->report({ErrorKind::Reference, "Cannot reassign undefined variable '" + name + "'",
                       nameToken.m_line, "Declare the variable before assigning to it.", nameToken.m_column});
     throw FatalError();
+}
+
+bool Env::isConst(const Token& nameToken)
+{
+    std::string name = nameToken.m_lexeme;
+    auto it = values.find(name);
+    if (it != values.end()) {
+        return it->second.isConst;
+    }
+    if (enclosing != nullptr) {
+        return enclosing->isConst(nameToken);
+    }
+    return false;
 }
