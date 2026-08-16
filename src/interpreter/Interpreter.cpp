@@ -982,6 +982,18 @@ void Interpreter::registerNatives()
         std::cout<<"\n";
         return Value{};
     };
+    //input
+    nativeFunctions["input"] = [](std::vector<Value>args, size_t line) -> Value
+    {   
+        if (args.size()>1) throw std::runtime_error("input() can not take more than one argument at line " + std::to_string(line));
+        if (args.size() == 1) {
+            std::cout<<args[0].stringify();
+            std::cout.flush();
+        }
+        std::string inputstr;
+        std::getline(std::cin, inputstr);
+        return Value(inputstr);
+    };
     // absolutee
     nativeFunctions["abs"] = [](std::vector<Value> args, size_t line) -> Value {
         if (args.size() != 1) throw std::runtime_error("abs() takes exactly 1 argument at line " + std::to_string(line));
